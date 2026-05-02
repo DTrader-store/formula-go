@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-🚧 **持续完善中** - 核心解析、执行、85 个内置函数、基础绘图事件输出和常用通达信兼容语法已实现并测试通过
+🚧 **持续完善中** - 核心解析、执行、85 个内置函数、8 个绘图事件函数、常用通达信兼容语法、函数边界测试、benchmark 基线和 TDX 真实行情示例已实现并测试通过
 
 本项目参考 [formula-ts](https://github.com/DTrader-store/formula-ts) TypeScript 实现，使用 Go 语言重新实现。
 
@@ -12,10 +12,11 @@
 
 - ✅ **类型安全**: 使用 Go 的强类型系统，确保代码安全性
 - ✅ **完整实现**: 词法分析、语法分析、解释执行全流程
-- ✅ **丰富的内置函数**: 85 个内置函数，覆盖常用技术指标、数学统计、引用、逻辑和基础绘图事件输出
-- ✅ **通达信兼容语法**: 支持 `:` 输出声明、常用样式后缀、行情字段别名和字符串字面量
+- ✅ **丰富的内置函数**: 85 个内置函数，覆盖常用技术指标、数学统计、引用、逻辑和 8 个绘图事件函数
+- ✅ **通达信兼容语法**: 支持 `:` 输出声明、常用样式后缀、行情字段别名、中文标识符和字符串字面量
 - ✅ **易于集成**: 简洁的 API 设计，易于集成到现有项目
-- ✅ **测试覆盖**: 注册表、README 函数清单和内置函数覆盖用例已建立一致性校验
+- ✅ **真实行情示例**: `examples/tdx_resistance_support` 可通过 TDX 接口拉取日 K 数据并计算阻力/支撑公式
+- ✅ **测试覆盖**: 注册表、README 函数清单、内置函数精准用例、参数边界、NaN 传播和 README 示例已建立一致性校验
 
 ## 安装
 
@@ -73,6 +74,7 @@ func main() {
 - ✅ 一元运算: `-x`
 - ✅ 通达信输出声明: `DIF: EMA(CLOSE, 12), COLORWHITE, LINETHICK2`
 - ✅ 输出样式后缀: `COLOR*`, `LINETHICK*`, `DOTLINE`, `STICK`, `COLORSTICK`, `VOLSTICK`, `NODRAW`
+- ✅ 中文标识符: `阻力1`, `支撑1`, `现价`
 - ✅ 字符串字面量: `'UP'`, `"UP"`，可用于 `DRAWTEXT`
 - ✅ 外部指标引用字面量: `"MACD.DIF#WEEK"`，当前仅在执行环境已存在同名变量时可解析
 
@@ -192,6 +194,7 @@ func main() {
 - 暂不支持需要日期或时间索引的函数，例如 `REFDATE`。如需实现，需要先扩展行情数据模型。
 - 暂不支持需要财务、盘口、成本分布或逐笔数据的函数，例如 `FINANCE`, `DYNAINFO`, `COST`, `WINNER`。
 - 绘图事件函数只返回结构化 `DrawingEvent`，不直接负责渲染图表；调用方可按自身图表库适配 `Function`, `BarIndex`, `Values`, `Text`, `Meta`。
+- TDX 示例中的日期不写入核心 `MarketData`；`examples/helpers.DailyKlines` 会额外保留 `Times`，调用方可用 `DrawingEvent.BarIndex` 映射回对应 K 线日期。
 
 ## 使用示例
 
@@ -295,6 +298,8 @@ result, _ := engine.Run(formula, marketData)
 
 ### 绘图事件
 
+绘图函数不会直接渲染图表，而是向 `FormulaResult.Drawings` 输出结构化事件：
+
 ```go
 formula := `
     UP := CLOSE > OPEN
@@ -316,13 +321,48 @@ result, _ := engine.Run(formula, marketData)
 // result.Drawings 中包含 DRAWLINE、DRAWBAND、DRAWKLINE 等结构化事件
 ```
 
+常用绘图事件 payload：
+- `DRAWTEXT`：`Function=DRAWTEXT`, `BarIndex`, `Values["price"]`, `Text`
+- `DRAWICON`：`Function=DRAWICON`, `BarIndex`, `Values["price"]`, `Values["value"]`
+- `DRAWNUMBER`：`Function=DRAWNUMBER`, `BarIndex`, `Values["price"]`, `Values["value"]`
+- `STICKLINE`：`Function=STICKLINE`, `BarIndex`, `Values["price1"]`, `Values["price2"]`, `Values["width"]`, `Values["empty"]`
+- `DRAWLINE`：`Function=DRAWLINE`, `BarIndex`, `Values["startBar"]`, `Values["startPrice"]`, `Values["endBar"]`, `Values["endPrice"]`, `Values["expand"]`
+- `POLYLINE`：`Function=POLYLINE`, `BarIndex`, `Values["price"]`
+- `DRAWBAND`：`Function=DRAWBAND`, `BarIndex`, `Values["upper"]`, `Values["upperColor"]`, `Values["lower"]`, `Values["lowerColor"]`
+- `DRAWKLINE`：`Function=DRAWKLINE`, `BarIndex`, `Values["high"]`, `Values["open"]`, `Values["low"]`, `Values["close"]`
+
+### TDX 真实行情阻力/支撑示例
+
+`examples/tdx_resistance_support` 会通过 `github.com/injoyai/tdx` 拉取真实日 K 数据，使用 `Z1 := 20`、`M1 := 3` 计算阻力/支撑公式，并把 `DRAWTEXT` 信号的 `BarIndex` 映射为 K 线日期输出。
+
+```bash
+go run ./examples/tdx_resistance_support -code sz000001 -count 360
+```
+
+示例公式：
+
+```tdx
+Z1 := 20;
+M1 := 3;
+阻力1:MA(REF(HHV(H,Z1),1),M1),COLORRED;
+阻力2:=MA(REF(HHV(H,15*Z1),1),M1),COLORCYAN;
+支撑1:MA(REF(LLV(L,Z1),1),M1),COLORGREEN;
+支撑2:=MA(REF(LLV(L,15*Z1),1),M1),COLORBLUE;
+现价:C, COLORBLACK;
+最高:H;
+最低:L;
+DRAWTEXT(CROSS(阻力1,H),C,'S');
+DRAWTEXT(CROSS(L,支撑1),C,'B');
+```
+
 ## 项目结构
 
 ```
 formula-go/
 ├── engine/              # 公式引擎
 │   ├── engine.go       # FormulaEngine 主类
-│   └── engine_test.go  # 集成测试
+│   ├── *_test.go       # 集成、注册表、边界、README 示例测试
+│   └── benchmark_test.go # 性能 benchmark 基线
 ├── errors/              # 错误类型定义
 │   ├── errors.go       # 各类错误
 │   └── errors_test.go
@@ -340,6 +380,9 @@ formula-go/
 │   ├── parser_test.go
 │   └── ast/            # 抽象语法树
 │       └── nodes.go
+├── examples/           # 示例程序
+│   ├── helpers/        # TDX 数据转换辅助
+│   └── tdx_resistance_support/ # 真实行情阻力/支撑 demo
 ├── types/              # 类型定义
 │   ├── market_data.go  # 市场数据
 │   ├── formula_result.go # 公式结果
@@ -368,10 +411,21 @@ go tool cover -html=coverage.out
 
 测试约束：
 - `engine/builtin_registry_test.go` 会校验注册表中的每个内置函数都有覆盖用例。
+- `engine/builtin_boundaries_test.go` 会校验每个注册函数的参数个数错误，并覆盖常见参数边界、类型错误和 NaN 传播规则。
+- `engine/readme_examples_test.go` 会抽取 README 中的公式示例并执行，避免文档示例漂移。
 - README 的内置函数清单会和 `interpreter.FunctionRegistry.Names()` 自动比对。
-- 新增函数如果只注册、不补测试或不更新 README，`go test ./...` 会失败。
+- 新增函数如果只注册、不补精准用例、参数边界或 README 清单，`go test ./...` 会失败。
 
 说明：`interpreter` 包的函数主要通过 `engine` 集成测试覆盖；`go test ./... -cover` 会按包独立统计，因此 `interpreter` 会显示为无直接测试文件。
+
+### 函数边界和 NaN 语义
+
+当前测试已固定以下核心规则：
+- 周期类函数要求周期参数为标量，并按函数语义校验正数、非负数或不超过数据长度。
+- 数值函数和绘图事件函数会拒绝不匹配的字符串参数或数组/标量参数形态。
+- `DRAWNULL()` 返回 `NaN`，可用于断线或隐藏。
+- 普通算术会传播 `NaN`；滚动窗口函数在窗口内存在 `NaN` 时输出 `NaN`。
+- 条件判断中 `0` 和 `NaN` 视为 false，其他数值视为 true。
 
 ## API 文档
 
@@ -460,17 +514,21 @@ type DrawingEvent struct {
 ### ✅ Phase 4: 通达信兼容增强
 
 - [x] 通达信输出声明、样式后缀和行情别名
+- [x] 中文标识符、字符串字面量和外部指标引用字面量
 - [x] 常用数学、统计、引用、逻辑、技术分析和基础绘图事件输出函数
 - [x] 内置函数注册表、README 清单和覆盖用例一致性校验
+- [x] 函数参数个数、常见边界、类型错误和 NaN 传播专项测试
+- [x] README 示例可执行性校验
+- [x] benchmark 基线和 TDX 真实行情阻力/支撑 demo
 
 ### 🚧 后续完善方向
 
 - [ ] `REFDATE`：需要日期字段或时间索引支持
 - [ ] `FINANCE` / `DYNAINFO` / `COST` / `WINNER`：需要扩展数据模型
-- [ ] 函数参数边界、错误语义和 NaN 传播规则专项测试
-- [ ] 更多绘图事件函数和下游图表库适配示例
-- [ ] 增量计算与性能优化
-- [ ] 格式化器和更完整的示例文档
+- [ ] 绘图事件下游图表库适配示例，例如把 `FormulaResult.Drawings` 转为具体图表库 annotation/series 数据
+- [ ] 增量计算与滚动窗口性能优化
+- [ ] 公式格式化器、兼容性矩阵和更完整的通达信差异文档
+- [ ] 可选扩展数据模型：在不破坏核心 `MarketData` 的前提下支持日期、财务、盘口或成本分布类函数
 
 ## 性能
 
@@ -485,6 +543,7 @@ go test ./engine -bench=. -benchmem
 - `BenchmarkRunMACD`：测试 MACD 公式的完整编译 + 执行。
 - `BenchmarkExecuteCompiledMACD`：测试已编译 AST 的重复执行。
 - `BenchmarkRunRollingFunctions`：测试 `MA/SUM/STD` 等滚动函数。
+- `BenchmarkRunExtendedRollingFunctions`：测试 `DEVSQ/STDDEV/COVAR/RELATE/BETA` 等扩展统计滚动函数。
 - `BenchmarkRunDrawingEvents`：测试基础绘图事件生成。
 
 优化性能时应先记录修改前后的 `ns/op`, `B/op`, `allocs/op`，并保留 `go test ./...` 通过结果。
@@ -548,4 +607,4 @@ ISC License
 ---
 
 **最后更新**: 2026-05-02
-**状态**: 核心解析执行、85 个内置函数、基础绘图事件输出和常用通达信兼容语法已实现；数据模型扩展和更多函数仍在推进
+**状态**: 核心解析执行、85 个内置函数、8 个结构化绘图事件函数、函数边界/NaN 专项测试、benchmark 基线和 TDX 真实行情示例已实现；日期、财务、盘口、成本分布等扩展数据模型仍未纳入核心 `MarketData`
