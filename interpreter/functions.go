@@ -31,16 +31,25 @@ func fnMA(args []*Value, _ []*types.MarketData) (*Value, error) {
 
 	result := make([]float64, len(data.Array))
 
-	// Fill first n-1 values with NaN
-	for i := 0; i < n-1; i++ {
-		result[i] = math.NaN()
-	}
-
-	// Calculate MA
-	for i := n - 1; i < len(data.Array); i++ {
-		sum := 0.0
-		for j := 0; j < n; j++ {
-			sum += data.Array[i-j]
+	sum := 0.0
+	nanCount := 0
+	for i, value := range data.Array {
+		if math.IsNaN(value) {
+			nanCount++
+		} else {
+			sum += value
+		}
+		if i >= n {
+			outgoing := data.Array[i-n]
+			if math.IsNaN(outgoing) {
+				nanCount--
+			} else {
+				sum -= outgoing
+			}
+		}
+		if i < n-1 || nanCount > 0 {
+			result[i] = math.NaN()
+			continue
 		}
 		result[i] = sum / float64(n)
 	}
@@ -106,16 +115,25 @@ func fnSUM(args []*Value, _ []*types.MarketData) (*Value, error) {
 
 	result := make([]float64, len(data.Array))
 
-	// Fill first n-1 values with NaN
-	for i := 0; i < n-1; i++ {
-		result[i] = math.NaN()
-	}
-
-	// Calculate SUM
-	for i := n - 1; i < len(data.Array); i++ {
-		sum := 0.0
-		for j := 0; j < n; j++ {
-			sum += data.Array[i-j]
+	sum := 0.0
+	nanCount := 0
+	for i, value := range data.Array {
+		if math.IsNaN(value) {
+			nanCount++
+		} else {
+			sum += value
+		}
+		if i >= n {
+			outgoing := data.Array[i-n]
+			if math.IsNaN(outgoing) {
+				nanCount--
+			} else {
+				sum -= outgoing
+			}
+		}
+		if i < n-1 || nanCount > 0 {
+			result[i] = math.NaN()
+			continue
 		}
 		result[i] = sum
 	}
@@ -130,6 +148,9 @@ func fnMAX(args []*Value, _ []*types.MarketData) (*Value, error) {
 	}
 
 	a, b := args[0], args[1]
+	if a.IsString || b.IsString || a.IsDraw || b.IsDraw {
+		return nil, errors.NewRuntimeError("MAX arguments must be numeric")
+	}
 
 	if !a.IsArray && !b.IsArray {
 		return NewSingleValue(math.Max(a.Single, b.Single)), nil
@@ -156,6 +177,9 @@ func fnMIN(args []*Value, _ []*types.MarketData) (*Value, error) {
 	}
 
 	a, b := args[0], args[1]
+	if a.IsString || b.IsString || a.IsDraw || b.IsDraw {
+		return nil, errors.NewRuntimeError("MIN arguments must be numeric")
+	}
 
 	if !a.IsArray && !b.IsArray {
 		return NewSingleValue(math.Min(a.Single, b.Single)), nil
@@ -177,40 +201,12 @@ func fnMIN(args []*Value, _ []*types.MarketData) (*Value, error) {
 
 // fnABS implements Absolute value: ABS(value)
 func fnABS(args []*Value, _ []*types.MarketData) (*Value, error) {
-	if len(args) != 1 {
-		return nil, errors.NewRuntimeError("ABS requires 1 argument")
-	}
-
-	val := args[0]
-
-	if !val.IsArray {
-		return NewSingleValue(math.Abs(val.Single)), nil
-	}
-
-	result := make([]float64, len(val.Array))
-	for i, v := range val.Array {
-		result[i] = math.Abs(v)
-	}
-	return NewArrayValue(result), nil
+	return numericUnaryFunc(args, "ABS", math.Abs)
 }
 
 // fnSQRT implements Square root: SQRT(value)
 func fnSQRT(args []*Value, _ []*types.MarketData) (*Value, error) {
-	if len(args) != 1 {
-		return nil, errors.NewRuntimeError("SQRT requires 1 argument")
-	}
-
-	val := args[0]
-
-	if !val.IsArray {
-		return NewSingleValue(math.Sqrt(val.Single)), nil
-	}
-
-	result := make([]float64, len(val.Array))
-	for i, v := range val.Array {
-		result[i] = math.Sqrt(v)
-	}
-	return NewArrayValue(result), nil
+	return numericUnaryFunc(args, "SQRT", math.Sqrt)
 }
 
 // fnREF implements Reference: REF(data, n) - reference data n periods ago
@@ -352,20 +348,22 @@ func fnIF(args []*Value, _ []*types.MarketData) (*Value, error) {
 	}
 
 	// Handle array condition
-	if !trueVal.IsArray || !falseVal.IsArray {
-		return nil, errors.NewRuntimeError("IF: when condition is array, both true/false values must be arrays")
+	if trueVal.IsString || falseVal.IsString || trueVal.IsDraw || falseVal.IsDraw {
+		return nil, errors.NewRuntimeError("IF: true/false values must be numeric")
 	}
-
-	if len(cond.Array) != len(trueVal.Array) || len(cond.Array) != len(falseVal.Array) {
-		return nil, errors.NewRuntimeError("IF: array length mismatch")
+	if trueVal.IsArray && len(cond.Array) != len(trueVal.Array) {
+		return nil, errors.NewRuntimeError("IF: true value array length mismatch")
+	}
+	if falseVal.IsArray && len(cond.Array) != len(falseVal.Array) {
+		return nil, errors.NewRuntimeError("IF: false value array length mismatch")
 	}
 
 	result := make([]float64, len(cond.Array))
 	for i := range cond.Array {
 		if cond.Array[i] != 0 {
-			result[i] = trueVal.Array[i]
+			result[i] = scalarOrArrayAt(trueVal, i)
 		} else {
-			result[i] = falseVal.Array[i]
+			result[i] = scalarOrArrayAt(falseVal, i)
 		}
 	}
 

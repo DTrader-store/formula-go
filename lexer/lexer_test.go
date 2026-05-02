@@ -98,6 +98,7 @@ func TestLexerIdentifiers(t *testing.T) {
 		{"uppercase identifier", "CLOSE", IDENTIFIER},
 		{"identifier with numbers", "MA5", IDENTIFIER},
 		{"identifier with underscore", "_temp", IDENTIFIER},
+		{"chinese identifier", "阻力1", IDENTIFIER},
 		{"keyword IF", "IF", IF},
 		{"keyword AND", "AND", AND},
 		{"keyword OR", "OR", OR},
@@ -147,6 +148,20 @@ func TestLexerFormulas(t *testing.T) {
 			input: "CLOSE > MA5",
 			expect: []TokenType{
 				IDENTIFIER, GT, IDENTIFIER, EOF,
+			},
+		},
+		{
+			name:  "tdx output style suffix",
+			input: "DIF:EMA(CLOSE,12),COLORWHITE,LINETHICK2",
+			expect: []TokenType{
+				IDENTIFIER, COLON, IDENTIFIER, LPAREN, IDENTIFIER, COMMA, NUMBER, RPAREN, COMMA, COLOR, COMMA, LINETHICK, EOF,
+			},
+		},
+		{
+			name:  "quoted external reference",
+			input: `"MACD.DIF#WEEK"`,
+			expect: []TokenType{
+				EXTERNAL_REFERENCE, EOF,
 			},
 		},
 	}
@@ -207,7 +222,7 @@ func TestLexerErrors(t *testing.T) {
 		input string
 	}{
 		{"unexpected character", "@"},
-		{"invalid operator", "#"},
+		{"unterminated string", `"MACD.DIF`},
 	}
 
 	for _, tt := range tests {

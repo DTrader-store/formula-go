@@ -21,6 +21,7 @@ const (
 	// Literals and Identifiers
 	IdentifierNode    NodeType = "Identifier"
 	NumberLiteralNode NodeType = "NumberLiteral"
+	StringLiteralNode NodeType = "StringLiteral"
 )
 
 // BinaryOperator represents binary operators
@@ -58,10 +59,11 @@ const (
 
 // DrawingStyle represents the drawing style configuration for output declarations
 type DrawingStyle struct {
-	Color  *string
-	Size   *int
-	Bold   *bool
-	Italic *bool
+	Color      *string
+	LineWidth  *int
+	LineStyle  *string
+	Hidden     bool
+	DrawMethod *string
 }
 
 // Node is the base interface for all AST nodes
@@ -169,3 +171,12 @@ type NumberLiteral struct {
 
 func (n *NumberLiteral) Type() NodeType { return NumberLiteralNode }
 func (n *NumberLiteral) exprNode()      {}
+
+// StringLiteral represents a quoted text or external indicator reference.
+type StringLiteral struct {
+	Value    string
+	External bool
+}
+
+func (s *StringLiteral) Type() NodeType { return StringLiteralNode }
+func (s *StringLiteral) exprNode()      {}

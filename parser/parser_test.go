@@ -84,6 +84,73 @@ func TestParserVariableDeclaration(t *testing.T) {
 	}
 }
 
+func TestParserVariableDeclarationIgnoresTDXStyleSuffix(t *testing.T) {
+	input := "阻力2 := MA(REF(HHV(H,15*Z1),1),M1), COLORCYAN;"
+
+	l := lexer.NewLexer(input)
+	tokens, err := l.Tokenize()
+	if err != nil {
+		t.Fatalf("Lexer error: %v", err)
+	}
+
+	p := NewParser(tokens)
+	program, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parser error: %v", err)
+	}
+
+	if len(program.Body) != 1 {
+		t.Fatalf("Expected 1 statement, got %d", len(program.Body))
+	}
+	varDecl, ok := program.Body[0].(*ast.VariableDeclaration)
+	if !ok {
+		t.Fatalf("Expected VariableDeclaration, got %T", program.Body[0])
+	}
+	if varDecl.Name != "阻力2" {
+		t.Errorf("Expected Chinese identifier name, got %s", varDecl.Name)
+	}
+}
+
+func TestParserOutputDeclarationWithStyle(t *testing.T) {
+	input := "DIF: EMA(CLOSE, 12), COLORWHITE, LINETHICK2, DOTLINE"
+
+	l := lexer.NewLexer(input)
+	tokens, err := l.Tokenize()
+	if err != nil {
+		t.Fatalf("Lexer error: %v", err)
+	}
+
+	p := NewParser(tokens)
+	program, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parser error: %v", err)
+	}
+
+	if len(program.Body) != 1 {
+		t.Fatalf("Expected 1 statement, got %d", len(program.Body))
+	}
+
+	outputDecl, ok := program.Body[0].(*ast.OutputDeclaration)
+	if !ok {
+		t.Fatalf("Expected OutputDeclaration, got %T", program.Body[0])
+	}
+	if outputDecl.Name != "DIF" {
+		t.Errorf("Expected name 'DIF', got '%s'", outputDecl.Name)
+	}
+	if outputDecl.Style == nil {
+		t.Fatal("Expected style metadata")
+	}
+	if outputDecl.Style.Color == nil || *outputDecl.Style.Color != "WHITE" {
+		t.Errorf("Expected color WHITE, got %#v", outputDecl.Style.Color)
+	}
+	if outputDecl.Style.LineWidth == nil || *outputDecl.Style.LineWidth != 2 {
+		t.Errorf("Expected line width 2, got %#v", outputDecl.Style.LineWidth)
+	}
+	if outputDecl.Style.LineStyle == nil || *outputDecl.Style.LineStyle != "dotted" {
+		t.Errorf("Expected dotted line style, got %#v", outputDecl.Style.LineStyle)
+	}
+}
+
 func TestParserPrecedence(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -161,6 +228,37 @@ func TestParserFunctionCall(t *testing.T) {
 				t.Errorf("Expected %d arguments, got %d", tt.argCount, len(funcCall.Arguments))
 			}
 		})
+	}
+}
+
+func TestParserStringLiteral(t *testing.T) {
+	input := `"MACD.DIF#WEEK"`
+
+	l := lexer.NewLexer(input)
+	tokens, err := l.Tokenize()
+	if err != nil {
+		t.Fatalf("Lexer error: %v", err)
+	}
+
+	p := NewParser(tokens)
+	program, err := p.Parse()
+	if err != nil {
+		t.Fatalf("Parser error: %v", err)
+	}
+
+	exprStmt, ok := program.Body[0].(*ast.ExpressionStatement)
+	if !ok {
+		t.Fatalf("Expected ExpressionStatement, got %T", program.Body[0])
+	}
+	stringLit, ok := exprStmt.Expr.(*ast.StringLiteral)
+	if !ok {
+		t.Fatalf("Expected StringLiteral, got %T", exprStmt.Expr)
+	}
+	if stringLit.Value != "MACD.DIF#WEEK" {
+		t.Errorf("Expected external ref value, got %s", stringLit.Value)
+	}
+	if !stringLit.External {
+		t.Error("Expected string literal to be marked as external")
 	}
 }
 

@@ -14,7 +14,8 @@ import (
 
 func main() {
 	fmt.Println("=== MA Cross Strategy Example ===")
-	fmt.Println("Detecting Golden Cross and Death Cross signals using real market data\n")
+	fmt.Println("Detecting Golden Cross and Death Cross signals using real market data")
+	fmt.Println()
 
 	// Initialize TDX client
 	client, err := helpers.NewTDXClient(helpers.DefaultTDXServer())

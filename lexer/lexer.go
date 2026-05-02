@@ -4,17 +4,18 @@ import (
 	"fmt"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/DTrader-store/formula-go/errors"
 )
 
 // Lexer performs lexical analysis on formula source code
 type Lexer struct {
-	input   string   // the source code to analyze
-	pos     int      // current position in input
-	line    int      // current line number (1-indexed)
-	column  int      // current column number (1-indexed)
-	tokens  []*Token // collected tokens
+	input  string   // the source code to analyze
+	pos    int      // current position in input
+	line   int      // current line number (1-indexed)
+	column int      // current column number (1-indexed)
+	tokens []*Token // collected tokens
 }
 
 // NewLexer creates a new Lexer instance
@@ -68,6 +69,11 @@ func (l *Lexer) scanToken() error {
 		return l.scanNumber()
 	}
 
+	// Handle quoted indicator references and text literals
+	if ch == '\'' || ch == '"' {
+		return l.scanString()
+	}
+
 	// Handle identifiers and keywords
 	if unicode.IsLetter(ch) || ch == '_' {
 		return l.scanIdentifier()
@@ -116,6 +122,38 @@ func (l *Lexer) scanNumber() error {
 	return nil
 }
 
+// scanString scans a quoted string token without the surrounding quotes.
+func (l *Lexer) scanString() error {
+	quote := l.advance()
+	start := l.pos
+	startCol := l.column - 1
+
+	for !l.isAtEnd() && l.peek() != quote {
+		if l.peek() == '\n' {
+			return errors.NewLexerError("unterminated string", l.line, startCol, string(quote))
+		}
+		l.advance()
+	}
+
+	if l.isAtEnd() {
+		return errors.NewLexerError("unterminated string", l.line, startCol, string(quote))
+	}
+
+	value := l.input[start:l.pos]
+	l.advance()
+	tokenType := STRING
+	if quote == '"' {
+		tokenType = EXTERNAL_REFERENCE
+	}
+	l.tokens = append(l.tokens, &Token{
+		Type:   tokenType,
+		Value:  value,
+		Line:   l.line,
+		Column: startCol,
+	})
+	return nil
+}
+
 // scanIdentifier scans an identifier or keyword
 func (l *Lexer) scanIdentifier() error {
 	start := l.pos
@@ -142,17 +180,21 @@ func (l *Lexer) scanIdentifier() error {
 // getKeywordType returns the token type for a keyword or IDENTIFIER
 func (l *Lexer) getKeywordType(upper string) TokenType {
 	keywords := map[string]TokenType{
-		"IF":        IF,
-		"AND":       AND,
-		"OR":        OR,
-		"COLOR":     COLOR,
-		"LINETHICK": LINETHICK,
-		"DOTLINE":   DOTLINE,
-		"STICK":     STICK,
+		"IF":      IF,
+		"AND":     AND,
+		"OR":      OR,
+		"DOTLINE": DOTLINE,
+		"STICK":   STICK,
 	}
 
 	if tokenType, exists := keywords[upper]; exists {
 		return tokenType
+	}
+	if strings.HasPrefix(upper, "COLOR") {
+		return COLOR
+	}
+	if strings.HasPrefix(upper, "LINETHICK") {
+		return LINETHICK
 	}
 	return IDENTIFIER
 }
@@ -222,6 +264,8 @@ func (l *Lexer) scanOperator() error {
 		} else {
 			return errors.NewLexerError("unexpected character", l.line, startCol, string(ch))
 		}
+	case '#':
+		l.addToken(HASH, "#")
 	default:
 		return errors.NewLexerError(fmt.Sprintf("unexpected character: %c", ch), l.line, startCol, string(ch))
 	}
@@ -234,7 +278,8 @@ func (l *Lexer) peek() rune {
 	if l.isAtEnd() {
 		return 0
 	}
-	return rune(l.input[l.pos])
+	ch, _ := utf8.DecodeRuneInString(l.input[l.pos:])
+	return ch
 }
 
 // advance returns the current character and moves to the next
@@ -242,8 +287,8 @@ func (l *Lexer) advance() rune {
 	if l.isAtEnd() {
 		return 0
 	}
-	ch := rune(l.input[l.pos])
-	l.pos++
+	ch, size := utf8.DecodeRuneInString(l.input[l.pos:])
+	l.pos += size
 	l.column++
 	return ch
 }

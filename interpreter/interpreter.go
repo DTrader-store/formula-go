@@ -12,9 +12,13 @@ import (
 
 // Value represents a computed value (can be single value or array)
 type Value struct {
-	Single float64    // Single value
-	Array  []float64  // Array of values
-	IsArray bool     // Whether this is an array value
+	Single   float64               // Single value
+	Array    []float64             // Array of values
+	Text     string                // String value for text/drawing functions
+	Drawings []*types.DrawingEvent // Drawing annotations
+	IsArray  bool                  // Whether this is an array value
+	IsString bool                  // Whether this is a string value
+	IsDraw   bool                  // Whether this is a drawing result
 }
 
 // NewSingleValue creates a single value
@@ -27,12 +31,30 @@ func NewArrayValue(arr []float64) *Value {
 	return &Value{Array: arr, IsArray: true}
 }
 
+// NewStringValue creates a string value.
+func NewStringValue(text string) *Value {
+	return &Value{Text: text, IsString: true}
+}
+
+// NewDrawingValue creates a drawing result value.
+func NewDrawingValue(drawings []*types.DrawingEvent) *Value {
+	return &Value{Drawings: drawings, IsDraw: true}
+}
+
 // Interpreter executes formula ASTs
 type Interpreter struct {
-	marketData  []*types.MarketData
-	variables   map[string]*Value
-	userVars    []string  // Track user-defined variables in order
-	functions   *FunctionRegistry
+	marketData []*types.MarketData
+	variables  map[string]*Value
+	userVars   []string // Track user-defined variables in order
+	outputs    []outputDeclaration
+	functions  *FunctionRegistry
+	exprCount  int
+}
+
+type outputDeclaration struct {
+	Name  string
+	Value *Value
+	Style *types.LineStyle
 }
 
 // NewInterpreter creates a new Interpreter
@@ -41,6 +63,7 @@ func NewInterpreter(marketData []*types.MarketData) *Interpreter {
 		marketData: marketData,
 		variables:  make(map[string]*Value),
 		userVars:   make([]string, 0),
+		outputs:    make([]outputDeclaration, 0),
 		functions:  NewFunctionRegistry(),
 	}
 }
@@ -89,7 +112,14 @@ func (interp *Interpreter) initMarketDataVariables() {
 	interp.variables["HIGH"] = NewArrayValue(high)
 	interp.variables["LOW"] = NewArrayValue(low)
 	interp.variables["VOLUME"] = NewArrayValue(volume)
+	interp.variables["VOL"] = interp.variables["VOLUME"]
+	interp.variables["V"] = interp.variables["VOLUME"]
 	interp.variables["AMOUNT"] = NewArrayValue(amount)
+	interp.variables["AMO"] = interp.variables["AMOUNT"]
+	interp.variables["O"] = interp.variables["OPEN"]
+	interp.variables["C"] = interp.variables["CLOSE"]
+	interp.variables["H"] = interp.variables["HIGH"]
+	interp.variables["L"] = interp.variables["LOW"]
 }
 
 // executeStatement executes a single statement
@@ -105,8 +135,9 @@ func (interp *Interpreter) executeStatement(stmt ast.Statement) error {
 		if err != nil {
 			return err
 		}
-		// Generate a name for standalone expressions
-		name := "__expr__"
+		// Generate a stable unique name for standalone expressions.
+		name := fmt.Sprintf("__expr__%d", interp.exprCount)
+		interp.exprCount++
 		if ident, ok := s.Expr.(*ast.Identifier); ok {
 			name = ident.Name
 		}
@@ -125,7 +156,7 @@ func (interp *Interpreter) executeVariableDeclaration(decl *ast.VariableDeclarat
 		return err
 	}
 	interp.variables[decl.Name] = value
-	interp.userVars = append(interp.userVars, decl.Name)  // Preserve order
+	interp.userVars = append(interp.userVars, decl.Name) // Preserve order
 	return nil
 }
 
@@ -136,7 +167,11 @@ func (interp *Interpreter) executeOutputDeclaration(decl *ast.OutputDeclaration)
 		return err
 	}
 	interp.variables[decl.Name] = value
-	// Mark as output (we'll handle this in buildResult)
+	interp.outputs = append(interp.outputs, outputDeclaration{
+		Name:  decl.Name,
+		Value: value,
+		Style: lineStyleFromAST(decl.Style),
+	})
 	return nil
 }
 
@@ -145,6 +180,8 @@ func (interp *Interpreter) evaluateExpression(expr ast.Expression) (*Value, erro
 	switch e := expr.(type) {
 	case *ast.NumberLiteral:
 		return interp.evaluateNumberLiteral(e)
+	case *ast.StringLiteral:
+		return interp.evaluateStringLiteral(e)
 	case *ast.Identifier:
 		return interp.evaluateIdentifier(e)
 	case *ast.BinaryExpression:
@@ -161,6 +198,18 @@ func (interp *Interpreter) evaluateExpression(expr ast.Expression) (*Value, erro
 // evaluateNumberLiteral evaluates a number literal
 func (interp *Interpreter) evaluateNumberLiteral(lit *ast.NumberLiteral) (*Value, error) {
 	return NewSingleValue(lit.Value), nil
+}
+
+// evaluateStringLiteral evaluates quoted external references when already available as variables.
+func (interp *Interpreter) evaluateStringLiteral(lit *ast.StringLiteral) (*Value, error) {
+	if lit.External {
+		value, exists := interp.variables[lit.Value]
+		if !exists {
+			return nil, errors.NewRuntimeError(fmt.Sprintf("undefined external reference: %s", lit.Value))
+		}
+		return value, nil
+	}
+	return NewStringValue(lit.Value), nil
 }
 
 // evaluateIdentifier evaluates an identifier
@@ -350,16 +399,59 @@ func (interp *Interpreter) evaluateFunctionCall(call *ast.FunctionCall) (*Value,
 // buildResult builds the final formula result
 func (interp *Interpreter) buildResult() *types.FormulaResult {
 	result := types.NewFormulaResult()
-
-	// Add user-defined variables to result in order
-	for _, name := range interp.userVars {
-		value := interp.variables[name]
-		if value.IsArray {
-			result.AddOutput(name, value.Array, nil)
-		} else {
+	addValueToResult := func(name string, value *Value, style *types.LineStyle) {
+		if value.IsDraw {
+			for _, drawing := range value.Drawings {
+				result.AddDrawing(drawing)
+			}
+		} else if value.IsArray {
+			result.AddOutput(name, value.Array, style)
+		} else if !value.IsString {
 			result.SetVariable(name, value.Single)
 		}
 	}
 
+	if len(interp.outputs) > 0 {
+		for _, output := range interp.outputs {
+			addValueToResult(output.Name, output.Value, output.Style)
+		}
+		for _, name := range interp.userVars {
+			value := interp.variables[name]
+			if value.IsDraw {
+				addValueToResult(name, value, nil)
+			}
+		}
+		return result
+	}
+
+	// Add user-defined variables to result in order
+	for _, name := range interp.userVars {
+		addValueToResult(name, interp.variables[name], nil)
+	}
+
 	return result
+}
+
+func lineStyleFromAST(style *ast.DrawingStyle) *types.LineStyle {
+	if style == nil {
+		return nil
+	}
+
+	lineStyle := &types.LineStyle{
+		Hidden: style.Hidden,
+	}
+	if style.Color != nil {
+		lineStyle.Color = *style.Color
+	}
+	if style.LineWidth != nil {
+		lineStyle.LineWidth = *style.LineWidth
+	}
+	if style.LineStyle != nil {
+		lineStyle.LineStyle = *style.LineStyle
+	}
+	if style.DrawMethod != nil {
+		lineStyle.DrawMethod = *style.DrawMethod
+	}
+
+	return lineStyle
 }

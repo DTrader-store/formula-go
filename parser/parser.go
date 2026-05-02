@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/DTrader-store/formula-go/errors"
 	"github.com/DTrader-store/formula-go/lexer"
@@ -59,6 +60,11 @@ func (p *Parser) parseStatement() (ast.Statement, error) {
 		return p.parseVariableDeclaration()
 	}
 
+	// TDX output declaration: name: expression[, style...]
+	if p.current.Type == lexer.IDENTIFIER && p.peek() != nil && p.peek().Type == lexer.COLON {
+		return p.parseOutputDeclaration()
+	}
+
 	// Otherwise, parse as expression statement
 	expr, err := p.parseExpression()
 	if err != nil {
@@ -73,6 +79,34 @@ func (p *Parser) parseStatement() (ast.Statement, error) {
 	return &ast.ExpressionStatement{Expr: expr}, nil
 }
 
+// parseOutputDeclaration parses a TDX output declaration: name: expression[, style...]
+func (p *Parser) parseOutputDeclaration() (*ast.OutputDeclaration, error) {
+	name := p.current.Value
+	p.advance() // consume identifier
+
+	if p.current.Type != lexer.COLON {
+		return nil, p.error("expected :")
+	}
+	p.advance() // consume :
+
+	value, err := p.parseExpression()
+	if err != nil {
+		return nil, err
+	}
+
+	style, err := p.parseStyleSuffixes()
+	if err != nil {
+		return nil, err
+	}
+
+	// Skip optional semicolon or newline
+	if !p.isAtEnd() && (p.current.Type == lexer.SEMICOLON || p.current.Type == lexer.NEWLINE) {
+		p.advance()
+	}
+
+	return &ast.OutputDeclaration{Name: name, Value: value, Style: style}, nil
+}
+
 // parseVariableDeclaration parses a variable declaration: name := expression
 func (p *Parser) parseVariableDeclaration() (*ast.VariableDeclaration, error) {
 	name := p.current.Value
@@ -85,6 +119,9 @@ func (p *Parser) parseVariableDeclaration() (*ast.VariableDeclaration, error) {
 
 	value, err := p.parseExpression()
 	if err != nil {
+		return nil, err
+	}
+	if _, err := p.parseStyleSuffixes(); err != nil {
 		return nil, err
 	}
 
@@ -270,6 +307,8 @@ func (p *Parser) parsePrimary() (ast.Expression, error) {
 	switch p.current.Type {
 	case lexer.NUMBER:
 		return p.parseNumber()
+	case lexer.STRING, lexer.EXTERNAL_REFERENCE:
+		return p.parseString()
 	case lexer.IDENTIFIER, lexer.IF: // IF can be used as function name
 		return p.parseIdentifierOrCall()
 	case lexer.LPAREN:
@@ -287,6 +326,14 @@ func (p *Parser) parseNumber() (*ast.NumberLiteral, error) {
 	}
 	p.advance()
 	return &ast.NumberLiteral{Value: value}, nil
+}
+
+// parseString parses a string literal.
+func (p *Parser) parseString() (*ast.StringLiteral, error) {
+	value := p.current.Value
+	external := p.current.Type == lexer.EXTERNAL_REFERENCE
+	p.advance()
+	return &ast.StringLiteral{Value: value, External: external}, nil
 }
 
 // parseIdentifierOrCall parses an identifier or function call
@@ -347,6 +394,93 @@ func (p *Parser) parseGroupedExpression() (ast.Expression, error) {
 	p.advance() // consume ')'
 
 	return expr, nil
+}
+
+func (p *Parser) parseStyleSuffixes() (*ast.DrawingStyle, error) {
+	var style *ast.DrawingStyle
+
+	for !p.isAtEnd() && p.current.Type == lexer.COMMA {
+		next := p.peek()
+		if next == nil || !p.isStyleToken(next) {
+			return style, nil
+		}
+
+		p.advance() // consume comma
+		if style == nil {
+			style = &ast.DrawingStyle{}
+		}
+
+		if err := p.applyStyleToken(style, p.current); err != nil {
+			return nil, err
+		}
+		p.advance()
+	}
+
+	return style, nil
+}
+
+func (p *Parser) isStyleToken(token *lexer.Token) bool {
+	if token == nil {
+		return false
+	}
+
+	switch token.Type {
+	case lexer.COLOR, lexer.LINETHICK, lexer.DOTLINE, lexer.STICK:
+		return true
+	case lexer.IDENTIFIER:
+		upper := strings.ToUpper(token.Value)
+		return upper == "NODRAW" || upper == "COLORSTICK" || upper == "VOLSTICK"
+	default:
+		return false
+	}
+}
+
+func (p *Parser) applyStyleToken(style *ast.DrawingStyle, token *lexer.Token) error {
+	upper := strings.ToUpper(token.Value)
+
+	switch token.Type {
+	case lexer.COLOR:
+		if upper == "COLORSTICK" {
+			drawMethod := "colorstick"
+			style.DrawMethod = &drawMethod
+			return nil
+		}
+		color := upper
+		if strings.HasPrefix(upper, "COLOR") && len(upper) > len("COLOR") {
+			color = upper[len("COLOR"):]
+		}
+		style.Color = &color
+	case lexer.LINETHICK:
+		widthText := strings.TrimPrefix(upper, "LINETHICK")
+		if widthText == "" {
+			width := 1
+			style.LineWidth = &width
+			return nil
+		}
+		width, err := strconv.Atoi(widthText)
+		if err != nil {
+			return p.error(fmt.Sprintf("invalid line width: %s", token.Value))
+		}
+		style.LineWidth = &width
+	case lexer.DOTLINE:
+		lineStyle := "dotted"
+		style.LineStyle = &lineStyle
+	case lexer.STICK:
+		drawMethod := strings.ToLower(upper)
+		style.DrawMethod = &drawMethod
+	case lexer.IDENTIFIER:
+		switch upper {
+		case "NODRAW":
+			style.Hidden = true
+		case "COLORSTICK", "VOLSTICK":
+			drawMethod := strings.ToLower(upper)
+			style.DrawMethod = &drawMethod
+		default:
+			return p.error(fmt.Sprintf("unexpected style token: %s", token.Value))
+		}
+	}
+
+	return nil
 }
 
 // advance moves to the next token

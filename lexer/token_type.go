@@ -7,8 +7,10 @@ type TokenType string
 // Token type constants
 const (
 	// Literals
-	NUMBER     TokenType = "NUMBER"
-	IDENTIFIER TokenType = "IDENTIFIER"
+	NUMBER             TokenType = "NUMBER"
+	STRING             TokenType = "STRING"
+	EXTERNAL_REFERENCE TokenType = "EXTERNAL_REFERENCE"
+	IDENTIFIER         TokenType = "IDENTIFIER"
 
 	// Operators
 	PLUS     TokenType = "PLUS"
@@ -48,6 +50,7 @@ const (
 	STICK     TokenType = "STICK"
 
 	// Special
+	HASH    TokenType = "HASH"
 	NEWLINE TokenType = "NEWLINE"
 	EOF     TokenType = "EOF"
 )

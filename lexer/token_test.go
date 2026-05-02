@@ -84,14 +84,14 @@ func TestTokenEquals(t *testing.T) {
 func TestTokenTypes(t *testing.T) {
 	// Test that all token type constants are defined
 	tokenTypes := []TokenType{
-		NUMBER, IDENTIFIER,
+		NUMBER, STRING, EXTERNAL_REFERENCE, IDENTIFIER,
 		PLUS, MINUS, MULTIPLY, DIVIDE,
 		GT, LT, GTE, LTE, EQ, NEQ,
 		AND, OR,
 		LPAREN, RPAREN, COMMA, SEMICOLON, COLON,
 		ASSIGN, IF,
 		COLOR, LINETHICK, DOTLINE, STICK,
-		NEWLINE, EOF,
+		HASH, NEWLINE, EOF,
 	}
 
 	for _, tt := range tokenTypes {

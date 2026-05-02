@@ -48,6 +48,7 @@ type (
 	FormulaResult = types.FormulaResult
 	OutputLine    = types.OutputLine
 	LineStyle     = types.LineStyle
+	DrawingEvent  = types.DrawingEvent
 )
 
 // Export engine types
