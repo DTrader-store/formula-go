@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-🚧 **持续完善中** - 核心解析、执行、85 个内置函数、8 个绘图事件函数、常用通达信兼容语法、函数边界测试、benchmark 基线和 TDX 真实行情示例已实现并测试通过
+- 核心解析、执行、85 个内置函数、8 个绘图事件函数、常用通达信兼容语法、函数边界测试、benchmark 基线和 TDX 真实行情示例已实现并测试通过
 
 本项目参考 [formula-ts](https://github.com/DTrader-store/formula-ts) TypeScript 实现，使用 Go 语言重新实现。
 
@@ -331,29 +331,6 @@ result, _ := engine.Run(formula, marketData)
 - `DRAWBAND`：`Function=DRAWBAND`, `BarIndex`, `Values["upper"]`, `Values["upperColor"]`, `Values["lower"]`, `Values["lowerColor"]`
 - `DRAWKLINE`：`Function=DRAWKLINE`, `BarIndex`, `Values["high"]`, `Values["open"]`, `Values["low"]`, `Values["close"]`
 
-### TDX 真实行情阻力/支撑示例
-
-`examples/tdx_resistance_support` 会通过 `github.com/injoyai/tdx` 拉取真实日 K 数据，使用 `Z1 := 20`、`M1 := 3` 计算阻力/支撑公式，并把 `DRAWTEXT` 信号的 `BarIndex` 映射为 K 线日期输出。
-
-```bash
-go run ./examples/tdx_resistance_support -code sz000001 -count 360
-```
-
-示例公式：
-
-```tdx
-Z1 := 20;
-M1 := 3;
-阻力1:MA(REF(HHV(H,Z1),1),M1),COLORRED;
-阻力2:=MA(REF(HHV(H,15*Z1),1),M1),COLORCYAN;
-支撑1:MA(REF(LLV(L,Z1),1),M1),COLORGREEN;
-支撑2:=MA(REF(LLV(L,15*Z1),1),M1),COLORBLUE;
-现价:C, COLORBLACK;
-最高:H;
-最低:L;
-DRAWTEXT(CROSS(阻力1,H),C,'S');
-DRAWTEXT(CROSS(L,支撑1),C,'B');
-```
 
 ## 项目结构
 
@@ -521,14 +498,6 @@ type DrawingEvent struct {
 - [x] README 示例可执行性校验
 - [x] benchmark 基线和 TDX 真实行情阻力/支撑 demo
 
-### 🚧 后续完善方向
-
-- [ ] `REFDATE`：需要日期字段或时间索引支持
-- [ ] `FINANCE` / `DYNAINFO` / `COST` / `WINNER`：需要扩展数据模型
-- [ ] 绘图事件下游图表库适配示例，例如把 `FormulaResult.Drawings` 转为具体图表库 annotation/series 数据
-- [ ] 增量计算与滚动窗口性能优化
-- [ ] 公式格式化器、兼容性矩阵和更完整的通达信差异文档
-- [ ] 可选扩展数据模型：在不破坏核心 `MarketData` 的前提下支持日期、财务、盘口或成本分布类函数
 
 ## 性能
 
@@ -606,5 +575,4 @@ ISC License
 
 ---
 
-**最后更新**: 2026-05-02
-**状态**: 核心解析执行、85 个内置函数、8 个结构化绘图事件函数、函数边界/NaN 专项测试、benchmark 基线和 TDX 真实行情示例已实现；日期、财务、盘口、成本分布等扩展数据模型仍未纳入核心 `MarketData`
+
